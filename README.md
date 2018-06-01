@@ -1,2 +1,2 @@
 # HOG-Human-Detector
-Pedestrian detection system using the Histogram of Gradients algorithm
+Image processing algorithm for human detection based on histogram of gradients.
