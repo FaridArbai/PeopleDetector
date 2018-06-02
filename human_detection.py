@@ -6,51 +6,98 @@ from database_creation import *
 from features_extraction import *
 import time
 
-
 WINDOW_HEIGHT 	= 128;
 WINDOW_WIDTH	= 64;
+SCALE_STEP = 1.2;
+WINDOW_STEP = 8;
+
+hog = cv2.HOGDescriptor();
 
 def detect(image_path, classifier):
 	start = time.time();
-	image = cv2.imread(image_path);
-	height, width, channels = np.shape(image);
-	step = 8;
+	orig_image = cv2.imread(image_path);
+	height, width, channels = np.shape(orig_image);
 	
-	y_pad = (height%step)//2;
-	x_pad = (width%step)//2;
+	pyramid = [orig_image]
+	windows = []
+	dims = (int(width//SCALE_STEP), int(height//SCALE_STEP))
 	
-	x_end = width - WINDOW_WIDTH - step;
-	y_end = height - WINDOW_HEIGHT - step;
+	while (dims[0]>128 and dims[1]>64):
+		blurred = cv2.GaussianBlur(pyramid[-1], ksize=(5, 5), sigmaX=0.6)
+		pyramid.append(cv2.resize(src=blurred, dsize=dims))
+		dims = (int(dims[0]//1.2), int(dims[1]//1.2))
 	
-	detected = [];
-	n_detected = 0;
-	n_rep = 0;
+	scale = 1
 	
-	for y in range(y_pad, y_end, step):
-		for x in range(x_pad, x_end, step):
-			cropped = image[y:y+WINDOW_HEIGHT,x:x+WINDOW_WIDTH];
-			features = extractFeatures(cropped);
-			prediction = classifier.predict([features]);
-			n_rep+=1;
-			if(prediction==1):
-				detected.append([x,y]);
-				n_detected +=1;
+	for image in pyramid:
+		height, width, channels = np.shape(image);
+		
+		y_pad = (height%WINDOW_STEP)//2;
+		x_pad = (width%WINDOW_STEP)//2;
+		
+		x_end = width-WINDOW_WIDTH-WINDOW_STEP;
+		y_end = height-WINDOW_HEIGHT-WINDOW_STEP;
+		
+		for y in range(y_pad, y_end, WINDOW_STEP):
+			for x in range(x_pad, x_end, WINDOW_STEP):
+				window = image[y:y+WINDOW_HEIGHT, x:x+WINDOW_WIDTH];
+				features = np.transpose(hog.compute(window));
+				
+				prediction = classifier.predict(features);
+				if (prediction==1):
+					windows.append(np.array([
+											x*scale,
+										 	y*scale,
+										 	(x+WINDOW_WIDTH)*scale,
+										 	(y+WINDOW_HEIGHT)*scale,
+										 	classifier.decision_function(features)
+										]));
+		
+		scale *= SCALE_STEP;
+	
 	
 	end = time.time();
 	elapsed = end - start;
+	windows = nonMaximumSuppression(np.asarray(windows),0.3);
+	n_windows = len(windows);
 	
-	print("Detected %d windows in %d seconds and %d rep"%(n_detected, elapsed, n_rep));
+	for i in range(n_windows):
+		x1 = int(windows[i][0]);
+		y1 = int(windows[i][1]);
+		x2 = int(windows[i][2]);
+		y2 = int(windows[i][3]);
+		cv2.rectangle(orig_image, (x1, y1), (x2, y2), (255, 0, 0), 1);
 	
-	for i in range(n_detected):
-		x = detected[i][0];
-		y = detected[i][1];
-		cv2.rectangle(image, (x,y), (x+WINDOW_WIDTH,y+WINDOW_HEIGHT), (255,0,0), 2);
+	print("Detected %d windows in %.2f seconds"%(n_windows, elapsed));
 	
-	cv2.imshow("windows", image);
+	cv2.imshow("windows", orig_image);
 	cv2.waitKey(0);
-	cv2.destroyAllWindows();
-	
-	
+	#cv2.destroyAllWindows();
+
+
+def nonMaximumSuppression(windows, overlap_threshold):
+	if not len(windows):
+		return np.array([])
+	# windows[:,0], windows[:,1] contain x,y of top left corner
+	# windows[:,2], windows[:,3] contain x,y of bottom right corner
+	I = np.argsort(windows[:,4])[::-1]
+	area = (windows[:,2]-windows[:,0]+1) * (windows[:,3]-windows[:,1]+1)
+	chosen = []
+
+	while len(I):
+		i = I[0]
+		# Dims of intersections between window i and the rest
+		width = np.maximum(0.0, np.minimum(windows[i,2], windows[I,2])-
+			np.maximum(windows[i,0], windows[I,0])+1)
+		height = np.maximum(0.0, np.minimum(windows[i,3], windows[I,3])-
+			np.maximum(windows[i,1], windows[I,1])+1)
+		overlap = (width*height).astype(np.float32)/area[I]
+		mask = overlap<overlap_threshold
+		I = I[mask]
+		if mask.shape[0]-np.sum(mask) > 1 :
+			chosen.append(i)
+	return windows[chosen]
+
 	
 	
 	
