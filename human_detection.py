@@ -5,6 +5,7 @@ from sklearn import svm, linear_model, metrics
 from database_creation import *
 from features_extraction import *
 import time
+from imutils.object_detection import non_max_suppression
 
 WINDOW_HEIGHT 	= 128;
 WINDOW_WIDTH	= 64;
@@ -13,9 +14,8 @@ WINDOW_STEP = 8;
 
 hog = cv2.HOGDescriptor();
 
-def detect(image_path, classifier):
+def detect(orig_image, classifier):
 	start = time.time();
-	orig_image = cv2.imread(image_path);
 	height, width, channels = np.shape(orig_image);
 	
 	pyramid = [orig_image]
@@ -58,7 +58,7 @@ def detect(image_path, classifier):
 	
 	end = time.time();
 	elapsed = end - start;
-	windows = nonMaximumSuppression(np.asarray(windows),0.3);
+	windows = non_max_suppression(np.array(windows), probs=None, overlapThresh=0.35)
 	n_windows = len(windows);
 	
 	for i in range(n_windows):
@@ -66,14 +66,14 @@ def detect(image_path, classifier):
 		y1 = int(windows[i][1]);
 		x2 = int(windows[i][2]);
 		y2 = int(windows[i][3]);
-		cv2.rectangle(orig_image, (x1, y1), (x2, y2), (255, 0, 0), 1);
+		cv2.rectangle(orig_image, (x1, y1), (x2, y2), (255, 0, 0), 2);
 	
 	print("Detected %d windows in %.2f seconds"%(n_windows, elapsed));
 	
 	cv2.imshow("windows", orig_image);
-	cv2.waitKey(0);
+	#cv2.waitKey(0);
 	#cv2.destroyAllWindows();
-
+	
 
 def nonMaximumSuppression(windows, overlap_threshold):
 	if not len(windows):
