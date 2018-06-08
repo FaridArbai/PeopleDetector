@@ -5,29 +5,49 @@ from sklearn import svm, linear_model, metrics
 from database_creation import *
 from features_extraction import *
 import time
-from imutils.object_detection import non_max_suppression
+import imutils.object_detection
 
-WINDOW_HEIGHT 	= 128;
-WINDOW_WIDTH	= 64;
-SCALE_STEP = 1.2;
-WINDOW_STEP = 8;
+EXTRACTOR = cv2.HOGDescriptor();
 
-hog = cv2.HOGDescriptor();
-
-def detect(orig_image, classifier):
-	start = time.time();
+def showWindows(orig_image, classifier):
+	'''
+	Esta función detecta a las personas de la imagen en varias
+	escalas usando el clasificador SVM proporcionado y usando
+	NMS para suprimir los solapamientos. Una vez detectados
+	todos los rectángulos, muestra estos junto a la imagen a
+	la par que los recorta a parte por si se quieren analizar.
+	
+	:param orig_image: Imagen original en la que hacer la
+		detección
+	:param classifier: Clasificador SVM ya entrenado
+	'''
+	
+	WINDOW_HEIGHT = 128;
+	WINDOW_WIDTH = 64;
+	SCALE_STEP = 1.2;
+	WINDOW_STEP = 8;
+	
+	GAUSS_KERNEL_SIZE = (5,5);
+	GAUSS_SIGMA = 0.6;
+	
 	height, width, channels = np.shape(orig_image);
 	
 	pyramid = [orig_image]
-	windows = []
-	dims = (int(width//SCALE_STEP), int(height//SCALE_STEP))
+
+	new_width = width//SCALE_STEP;
+	new_height = height//SCALE_STEP;
 	
-	while (dims[0]>128 and dims[1]>64):
-		blurred = cv2.GaussianBlur(pyramid[-1], ksize=(5, 5), sigmaX=0.6)
-		pyramid.append(cv2.resize(src=blurred, dsize=dims))
-		dims = (int(dims[0]//1.2), int(dims[1]//1.2))
+	while (new_height>WINDOW_HEIGHT and new_width>WINDOW_WIDTH):
+		blurred = cv2.GaussianBlur(pyramid[-1], ksize=GAUSS_KERNEL_SIZE,
+											sigmaX=GAUSS_SIGMA, sigmaY=GAUSS_SIGMA);
+		pyramid.append(cv2.resize(src=blurred, dsize=(int(new_width),int(new_height))))
+		
+		new_height //= SCALE_STEP;
+		new_width //= SCALE_STEP;
 	
-	scale = 1
+	
+	scaling_factor = 1;
+	windows = [];
 	
 	for image in pyramid:
 		height, width, channels = np.shape(image);
@@ -41,62 +61,43 @@ def detect(orig_image, classifier):
 		for y in range(y_pad, y_end, WINDOW_STEP):
 			for x in range(x_pad, x_end, WINDOW_STEP):
 				window = image[y:y+WINDOW_HEIGHT, x:x+WINDOW_WIDTH];
-				features = np.transpose(hog.compute(window));
+				features = np.transpose(EXTRACTOR.compute(window));
 				
 				prediction = classifier.predict(features);
 				if (prediction==1):
 					windows.append(np.array([
-											x*scale,
-										 	y*scale,
-										 	(x+WINDOW_WIDTH)*scale,
-										 	(y+WINDOW_HEIGHT)*scale,
+											x*scaling_factor,
+										 	y*scaling_factor,
+										 	(x+WINDOW_WIDTH)*scaling_factor,
+										 	(y+WINDOW_HEIGHT)*scaling_factor,
 										 	classifier.decision_function(features)
 										]));
 		
-		scale *= SCALE_STEP;
+		scaling_factor *= SCALE_STEP;
 	
-	
-	end = time.time();
-	elapsed = end - start;
-	windows = non_max_suppression(np.array(windows), probs=None, overlapThresh=0.35)
+
+	'''
+		Supresión de no-máximos usando la función non_max_suppression del
+		paquete imutils, el estándar para hacer NMS.
+	'''
+	windows = imutils.object_detection.non_max_suppression(np.array(windows),
+																			 probs=None,
+																			 overlapThresh=0.65)
 	n_windows = len(windows);
+	
+	cp_image = orig_image.copy();
 	
 	for i in range(n_windows):
 		x1 = int(windows[i][0]);
 		y1 = int(windows[i][1]);
 		x2 = int(windows[i][2]);
 		y2 = int(windows[i][3]);
-		cv2.rectangle(orig_image, (x1, y1), (x2, y2), (255, 0, 0), 2);
+		cv2.rectangle(orig_image, (x1, y1), (x2, y2), (0, 0, 255), 2);
+		cv2.imshow("Cropped window number %d"%(i+1), cp_image[y1:y2,x1:x2]);
 	
-	print("Detected %d windows in %.2f seconds"%(n_windows, elapsed));
+	cv2.imshow("Detected windows",orig_image);
 	
-	cv2.imshow("windows", orig_image);
-	#cv2.waitKey(0);
-	#cv2.destroyAllWindows();
 	
-
-def nonMaximumSuppression(windows, overlap_threshold):
-	if not len(windows):
-		return np.array([])
-	# windows[:,0], windows[:,1] contain x,y of top left corner
-	# windows[:,2], windows[:,3] contain x,y of bottom right corner
-	I = np.argsort(windows[:,4])[::-1]
-	area = (windows[:,2]-windows[:,0]+1) * (windows[:,3]-windows[:,1]+1)
-	chosen = []
-
-	while len(I):
-		i = I[0]
-		# Dims of intersections between window i and the rest
-		width = np.maximum(0.0, np.minimum(windows[i,2], windows[I,2])-
-			np.maximum(windows[i,0], windows[I,0])+1)
-		height = np.maximum(0.0, np.minimum(windows[i,3], windows[I,3])-
-			np.maximum(windows[i,1], windows[I,1])+1)
-		overlap = (width*height).astype(np.float32)/area[I]
-		mask = overlap<overlap_threshold
-		I = I[mask]
-		if mask.shape[0]-np.sum(mask) > 1 :
-			chosen.append(i)
-	return windows[chosen]
 
 	
 	
